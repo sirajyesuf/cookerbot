@@ -14,7 +14,7 @@ def subscribe(func):
         if (len(subscribed) and func.__name__ == '_help'):
             return func(*args, **kwargs)
         if (not len(subscribed) and func.__name__ == 'start'):
-            message = "We're up! You can use the following commands to talk to me:\n/recipe [ingredients,to,search]\n/random\n/randomfoodjokes\n/subscribe_to_weeekly_meal_plan"
+            message = "We're up! You can use the following commands to talk to me:\n/recipe [ingredients,to,search]\n/random\n/randomfoodjokes\n/subscribe_to_weekly_meal_plan"
             args = (*args, str(message))
             return func(*args, **kwargs)
         if (not len(subscribed) and func.__name__ == '_help'):
@@ -27,4 +27,5 @@ def subscribe(func):
             """
             args = (*args, str(message))
             return func(*args, **kwargs)
+
     return wrapper
