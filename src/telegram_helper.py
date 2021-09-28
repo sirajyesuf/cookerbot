@@ -3,20 +3,23 @@ import logging
 from typing import Text
 from certifi import contents
 import spoonacular
-
+from telegram.ext.jobqueue import JobQueue
+from decorators import subscribe
 import telegram
-from telegram.ext import (CommandHandler, Filters, MessageHandler, Updater)
+from telegram.ext import (CommandHandler, Filters, MessageHandler, Updater,
+                          dispatcher, updater)
 
 import config
 import exceptions
 import spoonacular_helper as sp
+from models import db, subscription
 
 spoon = sp.SpoonacularFacade()
 
 logging.info("Creating updaters and dispatchers...")
 
-UPDATER = Updater(config.TELEGRAM_TOKEN)
-DISPATCHER = UPDATER.dispatcher
+updater = Updater(config.TELEGRAM_TOKEN)
+dispatcher = updater.dispatcher
 
 logging.info("Updater and Dispatcher created.")
 
@@ -45,16 +48,21 @@ def format_message_and_get_parse_mode(recipe):
     return message, parse_mode
 
 
-def start(update, context):
+@subscribe
+def start(update, context, *args, **kwargs):
     """Start bot command function."""
-    context.bot.send_message(
-        chat_id=update.effective_chat.id,
-        text=("We're up! You can use the following commands to talk to me:\n"
-              "/recipe [ingredients,to,search]\n"
-              "/random\n"
-              "/happyhour\n"
-              "/taco\nMake something delicious!\n"
-              "/randomfoodjokes"))
+    if (len(args)):
+        context.bot.send_message(chat_id=update.effective_chat.id,
+                                 text=args[0])
+    else:
+        context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=(
+                "We're up! You can use the following commands to talk to me:\n"
+                "/recipe [ingredients,to,search]\n"
+                "/random\n"
+                "/happyhour\n"
+                "/randomfoodjokes"))
 
 
 def recipes_for_ingredients(update, context):
@@ -97,34 +105,49 @@ def random_recipe(update, context):
                              parse_mode=parse_mode)
 
 
-def random_alcoholic_beverage(update, context):
-    """Returns html formatted random alcoholic beverage recipe."""
-    recipe_id = spoon.get_random_alcoholic_beverage_recipe_id()
-    recipe = spoon.get_recipes_for_ids([recipe_id])
-    message, parse_mode = format_message_and_get_parse_mode(recipe[0])
-
-    context.bot.send_message(chat_id=update.effective_chat.id,
-                             text=message,
-                             parse_mode=telegram.ParseMode.HTML)
+def subscribe_to_weekly_meal_plan(update, context):
+    #store the user in the db
+    db.insert({'chat_id': update.effective_chat.id})
+    context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="successfully subscribe to weekly meal plan.")
 
 
-def _help(update, context):
+def unsubscribe_to_the_weekly_meal_plan(update, context):
+    #delete the user from the db
+    db.remove(subscription.chat_id == update.effective_chat.id)
+    context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="successfully unsubscribe to weekly meal plan.")
+
+
+def send_weekly_meal_plan(context):
+    #fetch all subscribers
+    subscribers = db.all()
+    for subscriber in subscribers:
+        recipe = spoon.get_random_recipe()
+        message, parse_mode = format_message_and_get_parse_mode(recipe)
+        context.bot.send_message(chat_id=subscriber['chat_id'],
+                                 text="\t\t\tWeekly Meal Plan\t\t\t\n" +
+                                 message,
+                                 parse_mode=parse_mode)
+
+
+@subscribe
+def _help(update, context, *args):
     """Returns list of commands."""
-    message = (
-        "Commands:\n"
-        "\t/recipe [ingredients,to,search] -> separted by commas, no brackets\n"
-        "\t/random [optional:tags] -> returns a random recipe\n"
-        "\t/taco -> returns a random taco recipe\n"
-        "\t /randomfoodjokes -> return a random food jokes")
-    context.bot.send_message(chat_id=update.effective_chat.id, text=message)
-
-
-def get_a_taco(update, context):
-    """Returns a random taco!"""
-    taco = "[Taco\!](https://taco-randomizer.herokuapp.com)"
-    context.bot.send_message(chat_id=update.effective_chat.id,
-                             text=taco,
-                             parse_mode=telegram.ParseMode.MARKDOWN_V2)
+    if (len(args)):
+        context.bot.send_message(chat_id=update.effective_chat.id,
+                                 text=args[0])
+    else:
+        context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=
+            ("\t/recipe [ingredients,to,search] -> separted by commas, no brackets\n"
+             "\t/random [optional:tags] -> returns a random recipe\n"
+             "\t/randomfoodjokes -> return a random food jokes"
+             "\t/unsubscribe_to_weekly_meal_plan -> unsubscribe from  weekly meal plan"
+             ))
 
 
 def random_food_jokes(update, context):
@@ -181,8 +204,11 @@ def error_handler(update, context):
 START_HANDLER = CommandHandler('start', start)
 RECIPE_INGREDIENTS_HANDLER = CommandHandler('recipe', recipes_for_ingredients)
 RANDOM_RECIPE_HANDLER = CommandHandler('random', random_recipe)
-TACO_HANDLER = CommandHandler('taco', get_a_taco)
 FOOD_JOKES_HANDLER = CommandHandler('randomfoodjokes', random_food_jokes)
+SUBSCRIBE_HANDLER = CommandHandler('subscribe_to_weekly_meal_plan',
+                                   subscribe_to_weekly_meal_plan)
+UNSUBSCRIBE_HANDLER = CommandHandler('unsubscribe_to_weekly_meal_plan',
+                                     unsubscribe_to_the_weekly_meal_plan)
 UNKNOWN_HANDLER = MessageHandler(Filters.command, unknown)
 HELP_HANDLER = CommandHandler('help', _help)
 
@@ -191,8 +217,9 @@ handlers = [
     HELP_HANDLER,
     RECIPE_INGREDIENTS_HANDLER,
     RANDOM_RECIPE_HANDLER,
-    TACO_HANDLER,
     FOOD_JOKES_HANDLER,
+    SUBSCRIBE_HANDLER,
+    UNSUBSCRIBE_HANDLER,
     # Unknown handler must be last
     UNKNOWN_HANDLER
 ]
@@ -200,8 +227,8 @@ handlers = [
 logging.info("Registering handlers with dispatcher...")
 
 for handler in handlers:
-    DISPATCHER.add_handler(handler)
+    dispatcher.add_handler(handler)
 
-DISPATCHER.add_error_handler(error_handler)
+dispatcher.add_error_handler(error_handler)
 
 logging.info("Handlers added to dispatcher.")

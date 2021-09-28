@@ -1,14 +1,17 @@
 import logging
 import telegram
-import telegram_helper
+from telegram_helper import updater,dispatcher,send_weekly_meal_plan
+
+
+
+
 
 def main():
     """Runs our bot."""
-    updater = telegram_helper.UPDATER
-
     logging.info("Starting the bot!")
-
     try:
+        dispatcher.job_queue.run_repeating(callback=send_weekly_meal_plan, interval=604800)
+        # 1 week=604,800 seconds
         updater.start_polling()
         updater.idle()
     except telegram.error.TelegramError as e:
